@@ -13,23 +13,30 @@
 
 #define TITLE "Filament Minder"
 #define VERSION "v0.2.3"
-#define SPOOLCOUNT 8              // Number of spools we wish to store. Can be up to [ (EEPROM.length()/sizeof(int)) - sizeof(int) ]
+#define SPOOLCOUNT 8              // Number of spools we wish to store. Can be up to [ (EEPROM.length()/sizeof(spool)) - sizeof(spool) ] 
 #define NEXTPIN 5                 // pin that the "next spool" button is on
 #define PREVPIN 4                 // pin that the "prev spool" button is on
 #define RESETPIN 6                // pin that the "new spool" button is on
 #define BUZZERPIN 13              // screecher pin
 #define THRESHOLD 50              // minimum amount (g) of remaining filament before alert.
 #define LEDPIN 16                 // pin to drive a error state LED (could be LED_INTERNAL, or hooked to discrete LED)
-#define SPOOLSIZE 1000            // Assumption of 1KG spool.  This may be updated for options via the reset menu if warranted
 #define TIMEBETWEENBEEPS 20000    // milliseconds between beep alerts
 #define LOADCELL_DOUT_PIN 2       // DOUT pin for HX711 load cell ADC
 #define LOADCELL_SCK_PIN 3        // SCK pin of HX711 load cell ADC
 #define LOADCELL_OFFSET 50682624  // Define these after calibration.
 #define LOADCELL_DIVIDER 5895655  // Define these after calibration.
 
-int currentSpool = 0;                 // global to store which spool we're currently using
+// Build a structure for the spool data
+struct spool {
+  int startWeight;
+  int capacity;
+  int future1;
+  int future2;
+};
+
+spool currentSpool = { 0, 0, 0, 0 };     // active spool
+int id = 0;                            // the index of the current spool
 int currentWeight;                // contains current spool's measured weight
-int startWeight;                  // contains current spool's day0 weight, retrieved from EEPROM
 int lastBeep = millis();          // keeps record of when a beep last occured to keep from overbeeping
 
 // Set up the load cell.
@@ -64,16 +71,15 @@ void setup() {
   lcd.clear();
   staticText();
  
-  // Determine which spool was last used and retrieve it's weight.
-  EEPROM.get(sizeof(int)*SPOOLCOUNT, currentSpool);
-  if (currentSpool < 0 || currentSpool >= SPOOLCOUNT) {   // if retrieved data not valid, init to 0
-     currentSpool = 0;  
+  // Determine which spool was last used 
+  EEPROM.get(sizeof(spool)*SPOOLCOUNT, id);
+  if (id < 0 || id >= SPOOLCOUNT) {   // if retrieved data not valid, init to 1
+     id = 0;  
   }
-  EEPROM.get(sizeof(int)*currentSpool, startWeight);      // if retrieved data not valid, init to 0
-  if(startWeight < 0) {
-    startWeight = 0;
-  }
- 
+
+  // Retrieve the spool struct
+  EEPROM.get(sizeof(struct spool)*id, currentSpool);   
+  
   // Execute a "ready" beep and flash the LED.
   tone(BUZZERPIN,1000); 
   delay(100);
@@ -102,22 +108,25 @@ void loop() {
       int pressed = 1;
 
       // Play tone, pitch derived from current spool id
-      tone(BUZZERPIN,1000+250*currentSpool);
+      tone(BUZZERPIN,1000+250*id);
       delay(100);
       noTone(BUZZERPIN);
 
       // Update the current spool working var and EEPROM val, if outside bounds, do not change.
       if(buttons[i] == PREVPIN) {
-        currentSpool = currentSpool - 1 < 0 ? 0 : currentSpool - 1;
+        id = id - 1 < 0 ? 0 : id - 1;
       } else {
-        currentSpool = currentSpool + 1 >= SPOOLCOUNT ? SPOOLCOUNT - 1 : currentSpool + 1;
+        id = id + 1 >= SPOOLCOUNT ? SPOOLCOUNT - 1 : id + 1;
       }
-      EEPROM.put(sizeof(int)*SPOOLCOUNT, currentSpool);
+      EEPROM.put(sizeof(spool)*SPOOLCOUNT, id);
       
-      // Retrieve the new spool's starting weight
-      EEPROM.get(currentSpool*sizeof(int), startWeight);
-      if(startWeight < 0) {
-        startWeight = 0;
+      // Retrieve the new spool's data
+      EEPROM.get(sizeof(struct spool)*id, currentSpool);  
+      if(currentSpool.startWeight < 0) {
+        currentSpool.startWeight = 0;
+      }
+      if(currentSpool.capacity < 0) {
+        currentSpool.capacity = 0;
       }
 
       // Do not continue until button is released.
@@ -145,12 +154,57 @@ void loop() {
     // wait for long press (5s), continue if released early
     while (digitalRead(RESETPIN) == HIGH) {
       if (millis() > startPush + 2000) { // if button has been held 2s or longer
-       
-        // Record the new spool's start weight to eeprom
+
+        // Beep to confirm new spool mode
+        beep(2000, 50);
+        beep(2000, 50);
+          
+        // Wait for button to be released before continuing.
+        while (digitalRead(RESETPIN) == HIGH) {
+          delay(10);
+        }
+      
+        // configure new spool's capacity
+        int initializing = 1;
+        lcd.setCursor(0,1);
+        lcd.print("Capacity: ");
+        lcd.setCursor(13,1);
+        lcd.print("g");
+        int capacity = 1000;
+        
+        while (initializing) {     
+          
+          lcd.setCursor(9,1);
+
+          // Fix cursor offset if < 4 digits.
+          if(capacity < 1000) {
+            lcd.print(0);
+            lcd.setCursor(10,1);
+          }
+          lcd.print(capacity);
+          
+          if (digitalRead(PREVPIN) == HIGH) {
+            beep(1000,10);
+            capacity = capacity > 0 ? capacity - 100 : 0;
+            delay(200);
+          }
+          if (digitalRead(NEXTPIN) == HIGH) {
+            beep(2000,10);
+            capacity = capacity < 9900 ? capacity + 100 : 9900;
+            delay(200);
+          }
+          if (digitalRead(RESETPIN) == HIGH) {
+            beep(2500,10);
+            beep(1000,250);
+            initializing = 0;            
+          }
+        }
+        currentSpool.capacity = capacity;
+        // Record the new spool's data to eeprom
+        currentSpool.startWeight = currentWeight;
         lcd.setCursor(0,1);
         lcd.print("RECORDING NEW  ");
-        startWeight = currentWeight;
-        EEPROM.put(currentSpool*sizeof(int), startWeight);  // Update EEPROM with new start weight for this spool.          
+        EEPROM.put(sizeof(spool)*id, currentSpool);  // Update EEPROM with new data for this spool.          
 
         // blink the LED
         blink();
@@ -162,17 +216,18 @@ void loop() {
         delay(250);
         tone(BUZZERPIN,2500);     
         delay(800);
-        noTone(BUZZERPIN);        
+        noTone(BUZZERPIN);
+        startPush = millis();
       }
     }
   }
   
   // Find remaining filament from spool size, start weight and current weight
-  int remaining = SPOOLSIZE - (startWeight - currentWeight);
+  int remaining = currentSpool.capacity - (currentSpool.startWeight - currentWeight);
   
   // Update the current spool and weight on LCD
   lcd.setCursor(13,0);
-  lcd.print(currentSpool+1, DEC);
+  lcd.print(id+1, DEC);
   lcd.setCursor(10,1);
   lcd.print(remaining, DEC);
 
@@ -194,14 +249,9 @@ void error(char string[], int hz, bool flash) {
   }
 
   // Don't beep more often than defined
-  if (millis() > lastBeep + TIMEBETWEENBEEPS) {
-    tone(BUZZERPIN, hz);
-    delay(100);
-    noTone(BUZZERPIN);
-    delay(30);
-    tone(BUZZERPIN, hz);
-    delay(100);
-    noTone(BUZZERPIN);
+  if (millis() > lastBeep + TIMEBETWEENBEEPS && hz > 0) {
+    beep(hz, 100);
+    beep(hz, 100);
     lastBeep = millis();
   }
   
@@ -229,4 +279,12 @@ void blink() {
   digitalWrite(LEDPIN, HIGH);
   delay(250);
   digitalWrite(LEDPIN, LOW);
+}
+
+// play a single tone for defined delay
+void beep(int hz, int s) {
+    tone(BUZZERPIN, hz);
+    delay(s);
+    noTone(BUZZERPIN);
+    delay(s);
 }
