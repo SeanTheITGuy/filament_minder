@@ -164,6 +164,7 @@ void loop() {
           lcd.setCursor(0,1);
           lcd.print("RECORDING NEW  ");
           EEPROM.put(currentSpool*sizeof(int), currentWeight);
+          pressed = 0;  // assume release of button, restarting button hold timer.
         }
       }
     }
