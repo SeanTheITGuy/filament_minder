@@ -230,6 +230,12 @@ void loop() {
   lcd.print(id+1, DEC);
   lcd.print(" ");
   lcd.setCursor(10,1);
+  
+  // Fix cursor offset if < 4 digits.
+  if(remaining < 1000) {
+    lcd.print(0);
+    lcd.setCursor(11,1);
+  }
   lcd.print(remaining, DEC);
 
   // Check if current weight is below threshold, set alert status if so
