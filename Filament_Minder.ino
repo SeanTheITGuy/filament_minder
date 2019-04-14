@@ -12,17 +12,17 @@
 #include <LiquidCrystal.h>
 
 #define TITLE "Filament Minder"
-#define VERSION "v0.3"
+#define VERSION "v0.3.2"
 #define SPOOLCOUNT 8             // Number of spools we wish to store. Can be up to [ (EEPROM.length()/sizeof(spool)) - sizeof(spool) ] 
-#define NEXTPIN 5                 // pin that the "next spool" button is on
-#define PREVPIN 4                 // pin that the "prev spool" button is on
-#define RESETPIN 6                // pin that the "new spool" button is on
+#define PREVPIN 8                 // pin that the "prev spool" button is on
+#define NEXTPIN 9                 // pin that the "next spool" button is on
+#define RESETPIN 10                // pin that the "new spool" button is on
 #define BUZZERPIN 13              // screecher pin
 #define THRESHOLD 50              // minimum amount (g) of remaining filament before alert.
-#define LEDPIN 16                 // pin to drive a error state LED (could be LED_INTERNAL, or hooked to discrete LED)
+#define LEDPIN 14                 // pin to drive a error state LED (could be LED_INTERNAL, or hooked to discrete LED)
 #define TIMEBETWEENBEEPS 20000    // milliseconds between beep alerts
-#define LOADCELL_DOUT_PIN 2       // DOUT pin for HX711 load cell ADC
-#define LOADCELL_SCK_PIN 3        // SCK pin of HX711 load cell ADC
+#define LOADCELL_DOUT_PIN 11       // DOUT pin for HX711 load cell ADC
+#define LOADCELL_SCK_PIN 12        // SCK pin of HX711 load cell ADC
 #define LOADCELL_OFFSET 50682624  // Define these after calibration.
 #define LOADCELL_DIVIDER 5895655  // Define these after calibration.
 
@@ -43,7 +43,7 @@ int lastBeep = millis();          // keeps record of when a beep last occured to
 HX711 scale;
 
 // Set up the display
-LiquidCrystal lcd(7, 8, 9, 10, 11 , 12);
+LiquidCrystal lcd(2, 3, 4, 5, 6, 7);
 
 void setup() { 
    //Serial.begin(57600);
@@ -96,7 +96,7 @@ void loop() {
       currentWeight = 0;                          // if measured data not valid, init to 0
     }
   } else {
-      error("SCALE ERROR!!!!", 1000, true);       // if load cell ADC not ready after 100 retries, display error.
+      error("SCALE ERROR!!!!", 0, true);       // if load cell ADC not ready after 100 retries, display error.
  }
 
   // Check to see if a spool button is pressed to switch between spools
@@ -220,6 +220,8 @@ void loop() {
         startPush = millis();
       }
     }
+  lcd.clear();
+  staticText();
   }
   
   // Find remaining filament from spool size, start weight and current weight
