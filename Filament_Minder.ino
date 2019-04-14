@@ -12,7 +12,7 @@
 #include <LiquidCrystal.h>
 
 #define TITLE "Filament Minder"
-#define VERSION "v0.2.2"
+#define VERSION "v0.2.3"
 #define SPOOLCOUNT 8              // Number of spools we wish to store. Can be up to [ (EEPROM.length()/sizeof(int)) - sizeof(int) ]
 #define NEXTPIN 4                 // pin that the "next spool" button is on
 #define PREVPIN 5                 // pin that the "prev spool" button is on
