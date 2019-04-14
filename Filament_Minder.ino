@@ -14,20 +14,20 @@
 #define TITLE "Filament Minder"
 #define VERSION "v0.2.3"
 #define SPOOLCOUNT 8              // Number of spools we wish to store. Can be up to [ (EEPROM.length()/sizeof(int)) - sizeof(int) ]
-#define NEXTPIN 4                 // pin that the "next spool" button is on
-#define PREVPIN 5                 // pin that the "prev spool" button is on
+#define NEXTPIN 5                 // pin that the "next spool" button is on
+#define PREVPIN 4                 // pin that the "prev spool" button is on
 #define RESETPIN 6                // pin that the "new spool" button is on
 #define BUZZERPIN 13              // screecher pin
 #define THRESHOLD 50              // minimum amount (g) of remaining filament before alert.
 #define LEDPIN 16                 // pin to drive a error state LED (could be LED_INTERNAL, or hooked to discrete LED)
 #define SPOOLSIZE 1000            // Assumption of 1KG spool.  This may be updated for options via the reset menu if warranted
 #define TIMEBETWEENBEEPS 20000    // milliseconds between beep alerts
-#define LOADCELL_DOUT_PIN 15      // DOUT pin for HX711 load cell ADC
-#define LOADCELL_SCK_PIN 14       // SCK pin of HX711 load cell ADC
+#define LOADCELL_DOUT_PIN 2       // DOUT pin for HX711 load cell ADC
+#define LOADCELL_SCK_PIN 3        // SCK pin of HX711 load cell ADC
 #define LOADCELL_OFFSET 50682624  // Define these after calibration.
 #define LOADCELL_DIVIDER 5895655  // Define these after calibration.
 
-int currentSpool;                 // global to store which spool we're currently using
+int currentSpool = 0;                 // global to store which spool we're currently using
 int currentWeight;                // contains current spool's measured weight
 int startWeight;                  // contains current spool's day0 weight, retrieved from EEPROM
 int lastBeep = millis();          // keeps record of when a beep last occured to keep from overbeeping
@@ -39,6 +39,8 @@ HX711 scale;
 LiquidCrystal lcd(7, 8, 9, 10, 11 , 12);
 
 void setup() { 
+   //Serial.begin(57600);
+  
   // Configure the load cell
    scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
    scale.set_scale(LOADCELL_DIVIDER);
@@ -60,8 +62,7 @@ void setup() {
   lcd.print(TITLE);
   delay(300);
   lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Active Spool:");
+  staticText();
  
   // Determine which spool was last used and retrieve it's weight.
   EEPROM.get(sizeof(int)*SPOOLCOUNT, currentSpool);
@@ -73,13 +74,15 @@ void setup() {
     startWeight = 0;
   }
  
-  // Execute a "ready" beep
+  // Execute a "ready" beep and flash the LED.
   tone(BUZZERPIN,1000); 
   delay(100);
   noTone(BUZZERPIN);  
+  blink();  
 }
 
-void loop() {   
+void loop() {  
+   
   // Get the current weight from the loadcell (retry 100 times, then error out). get_units(X) averages X measurements.
   if (scale.wait_ready_retry(100)) {
     currentWeight = (int) scale.get_units(10);    // cast the long float response to an int for 1g granularity
@@ -92,10 +95,9 @@ void loop() {
 
   // Check to see if a spool button is pressed to switch between spools
   int buttons[] = {PREVPIN, NEXTPIN};
-  for(int i = 0; i < SPOOLCOUNT; i++) {
-    int buttonState = digitalRead(buttons[i]);
-    if(buttonState == HIGH) {
-
+  for(int i = 0; i < 2; i++) {
+    if(digitalRead(buttons[i]) == HIGH) {
+      
       // Set button pressed flag high
       int pressed = 1;
 
@@ -104,12 +106,13 @@ void loop() {
       delay(100);
       noTone(BUZZERPIN);
 
-      // Update the current spool var, if outside bounds, do not change.
+      // Update the current spool working var and EEPROM val, if outside bounds, do not change.
       if(buttons[i] == PREVPIN) {
         currentSpool = currentSpool - 1 < 0 ? 0 : currentSpool - 1;
       } else {
         currentSpool = currentSpool + 1 >= SPOOLCOUNT ? SPOOLCOUNT - 1 : currentSpool + 1;
       }
+      EEPROM.put(sizeof(int)*SPOOLCOUNT, currentSpool);
       
       // Retrieve the new spool's starting weight
       EEPROM.get(currentSpool*sizeof(int), startWeight);
@@ -118,22 +121,18 @@ void loop() {
       }
 
       // Do not continue until button is released.
-      while (pressed) {
-        if(digitalRead(buttons[i]) == LOW) {
-          pressed = 0;
-        }         
+      while (digitalRead(buttons[i]) == HIGH) {                
+        delay(10);
       }
     }
   }
 
   // Check for the spool reset button
-  int buttonState = digitalRead(RESETPIN);
-  if(buttonState == HIGH) {
+  if(digitalRead(RESETPIN) == HIGH) {
 
-    // Set button flag high and record push start time
-    int pressed = 1;
-    int startPush = millis();
-
+    // Record push start time
+    unsigned long startPush = millis();
+    
     // Play initial beep
     tone(BUZZERPIN,3000);
     delay(100);
@@ -142,31 +141,28 @@ void loop() {
     // notify instructions for reset
     lcd.setCursor(0,1);
     lcd.print("HOLD FOR NEW   ");
-
+    
     // wait for long press (5s), continue if released early
-    while (pressed) {
-      if(digitalRead(RESETPIN) == LOW) {
-        pressed = 0;
-      }
-      else {      
-        if (millis() > startPush + 5000) { // if button has been held 5s or longer
-          
-          // Play reset tune.
-          tone(BUZZERPIN,500);
-          delay(250);
-          tone(BUZZERPIN,1500);
-          delay(250);
-          tone(BUZZERPIN,2500);     
-          delay(800);
-          noTone(BUZZERPIN);
+    while (digitalRead(RESETPIN) == HIGH) {
+      if (millis() > startPush + 2000) { // if button has been held 2s or longer
+       
+        // Record the new spool's start weight to eeprom
+        lcd.setCursor(0,1);
+        lcd.print("RECORDING NEW  ");
+        startWeight = currentWeight;
+        EEPROM.put(currentSpool*sizeof(int), startWeight);  // Update EEPROM with new start weight for this spool.          
 
-          // Record the new spool's start weight to eeprom
-          lcd.setCursor(0,1);
-          lcd.print("RECORDING NEW  ");
-          EEPROM.put(currentSpool*sizeof(int), currentWeight);
-          pressed = 0;  // assume release of button, restarting button hold timer.
-          delay(2000); // wait 2s for slow fingered users to release.
-        }
+        // blink the LED
+        blink();
+        
+        // Play reset tune.
+        tone(BUZZERPIN,500);
+        delay(250);
+        tone(BUZZERPIN,1500);
+        delay(250);
+        tone(BUZZERPIN,2500);     
+        delay(800);
+        noTone(BUZZERPIN);        
       }
     }
   }
@@ -185,8 +181,7 @@ void loop() {
     error("LOW ALERT:", 0, true);
   }
   else {
-    lcd.setCursor(0,1);
-    lcd.print("Remaining:      ");
+    staticText();
   }
 }
 
@@ -195,7 +190,7 @@ void error(char string[], int hz, bool flash) {
   lcd.setCursor(0,1);
   lcd.print(string);
   if (flash) {
-    digitalWrite(LEDPIN, HIGH);
+   blink();
   }
 
   // Don't beep more often than defined
@@ -210,7 +205,28 @@ void error(char string[], int hz, bool flash) {
     lastBeep = millis();
   }
   
-  delay(2000); // Wait 2 seconds to display LED and LCD error
+  //delay(2000); // Wait 2 seconds to display LED and LCD error
   lcd.setCursor(0,1); // Return cursor to home location for normal operation.
   digitalWrite(LEDPIN, LOW); // Turn off LED when returning to operation.
+}
+
+// Display/refresh the static text
+void staticText() {
+  lcd.setCursor(0,0);
+  lcd.print("Active Spool:");
+  lcd.setCursor(0,1);
+  lcd.print("Remaining:");
+  lcd.setCursor(14,1);
+  lcd.print("g");
+}
+
+// Flash the LED pin
+void blink() {
+  digitalWrite(LEDPIN, HIGH);
+  delay(250);
+  digitalWrite(LEDPIN, LOW);
+  delay(50);
+  digitalWrite(LEDPIN, HIGH);
+  delay(250);
+  digitalWrite(LEDPIN, LOW);
 }
