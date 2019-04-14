@@ -165,6 +165,7 @@ void loop() {
           lcd.print("RECORDING NEW  ");
           EEPROM.put(currentSpool*sizeof(int), currentWeight);
           pressed = 0;  // assume release of button, restarting button hold timer.
+          delay(2000); // wait 2s for slow fingered users to release.
         }
       }
     }
@@ -181,7 +182,7 @@ void loop() {
 
   // Check if current weight is below threshold, set alert status if so
   if (remaining - THRESHOLD <= 0) {
-    error("LOW ALERT      ", 0, true);
+    error("LOW ALERT:", 0, true);
   }
   else {
     lcd.setCursor(0,1);
