@@ -29,7 +29,6 @@
 #define BUZZERPIN 7               // screecher pin
 #define THRESHOLD 50              // minimum amount (g) of remaining filament before alert.
 #define TIMEBETWEENBEEPS 20000    // milliseconds between beep alerts
-#define OLED_ADDR 0x3D            // I2C address of the OLED panel.
 #define LOADCELL_DOUT_PIN 2       // DOUT pin for HX711 load cell ADC
 #define LOADCELL_SCK_PIN 3        // SCK pin of HX711 load cell ADC
 #define LOADCELL_OFFSET 50682624  // Define these after calibration.
@@ -37,6 +36,19 @@
 #define SCREEN_WIDTH 128          // OLED display width, in pixels
 #define SCREEN_HEIGHT 64          // OLED display height, in pixels
 #define OLED_RESET -1             // Reset pin # (or -1 if sharing Arduino reset pin)
+#define OLED_ADDR 0x3C            // I2C address of the OLED panel.
+
+//#define DEBUG
+#ifdef DEBUG
+  #define DEBUG_START(x) DEBUG_START(x); 
+  #define DEBUG_PRINT(x) DEBUG_PRINT(x)
+  #define DEBUG_PRINTLN(x) DEBUG_PRINTLN(x)
+#else
+  #define DEBUG_START(x)
+  #define DEBUG_PRINT(x)
+  #define DEBUG_PRINTLN(x)  
+#endif
+
 
 // Build a structure for the spool data
 struct spool {
@@ -58,18 +70,18 @@ HX711 scale;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 void setup() { 
-   Serial.begin(115200);
+  
+  DEBUG_START(115200);
 
-   // Set up the display
-   if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) { 
-    Serial.println(F("SSD1306 allocation failed"));
+  // Set up the display
+  if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) { 
+    DEBUG_PRINTLN(F("SSD1306 allocation failed"));
     for(;;); // Don't proceed, loop forever
   }
 
   // Display stored logo buffer TODO: replace the logo.
   display.display();
   delay(1000); // pause for 1 second.
-  display.clearDisplay();
   
   // Configure the load cell
   scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
@@ -82,24 +94,31 @@ void setup() {
   pinMode(NEXTPIN, INPUT);
   pinMode(PREVPIN, INPUT);
 
-  // Display startup on OLED
+  // Display startup on OLED TODO
   
-  // Determine which spool was last used 
+  // Determine which spool was last used, retrieving data from memory above highest spool
   EEPROM.get(sizeof(spool)*SPOOLCOUNT, id);
   if (id < 0 || id >= SPOOLCOUNT) {   // if retrieved data not valid, init to first spool
      id = 0;  
   }
 
-  // Retrieve the spool struct
+  // Retrieve the last used spool struct
   EEPROM.get(sizeof(struct spool)*id, currentSpool);   
+
+  // Configure display
+  display.setTextSize(2); // Draw 2X-scale text
+  display.setTextColor(WHITE);
   
   // Execute a "ready" beep
-  Serial.println("Ready!");
+  DEBUG_PRINTLN("Ready!");
   beep(1000,100);
+
+  // Wipe display
+  blank();
 }
 
 void loop() {  
-   
+
   // Get the current weight from the loadcell (retry 100 times, then error out). get_units(X) averages X measurements.
   if (scale.wait_ready_retry(100)) {
     currentWeight = (int) scale.get_units(10);    // cast the long float response to an int for 1g granularity
@@ -107,7 +126,7 @@ void loop() {
       currentWeight = 0;                          // if measured data not valid, init to 0
     }
   } else {
-      error("SCALE ERROR!!!!", 0);       // if load cell ADC not ready after 100 retries, display error.
+      error("SCALE ERR", 0);       // if load cell ADC not ready after 100 retries, display error.
  }
 
   // Check to see if a spool button is pressed to switch between spools
@@ -142,8 +161,9 @@ void loop() {
       while (digitalRead(buttons[i]) == HIGH) {                
         delay(10);
       }
-      Serial.print("Active spool changed to: ");
-      Serial.println(id);
+      DEBUG_PRINT("Active spool changed to: ");
+      DEBUG_PRINTLN(id);
+      blank();
     }
   }
 
@@ -156,10 +176,10 @@ void loop() {
     // Play initial beep
     beep(3000,100);
 
-    // notify instructions for reset
-        
     // wait for long press (5s), continue if released early
-    while (digitalRead(RESETPIN) == HIGH) {
+    blank();
+    while (digitalRead(RESETPIN) == HIGH) {      
+      error("HOLD",0);
       if (millis() > startPush + 2000) { // if button has been held 2s or longer
 
         // Beep to confirm new spool mode
@@ -167,10 +187,13 @@ void loop() {
         beep(2000, 50);
           
         // Wait for button to be released before continuing.
+        blank();
         while (digitalRead(RESETPIN) == HIGH) {
+          error("RELEASE",0);
           delay(10);
         }
-      
+        blank();
+
         // configure new spool's capacity
         int initializing = 1;
         int capacity = 1000;
@@ -178,28 +201,43 @@ void loop() {
         while (initializing) {     
           
           // display updated capacity TODO
+          display.setCursor(10,0);
+          display.println("CAPACITY:");
+          display.setCursor(10,31);
+          display.println(capacity);
+          display.display();
                     
           // adjust capacity of new spool
           if (digitalRead(PREVPIN) == HIGH) {
             beep(1000,10);
             capacity = capacity > 0 ? capacity - 100 : 0;
-            Serial.print("Capacity ");
-            Serial.println(capacity);
+            DEBUG_PRINT("Capacity ");
+            DEBUG_PRINTLN(capacity);
             delay(200);
+            blank();
           }
           if (digitalRead(NEXTPIN) == HIGH) {
             beep(2000,10);
             capacity = capacity < 9900 ? capacity + 100 : 9900;
-            Serial.print("Capacity ");
-            Serial.println(capacity);
+            DEBUG_PRINT("Capacity ");
+            DEBUG_PRINTLN(capacity);
             delay(200);
+            blank();
           }
           if (digitalRead(RESETPIN) == HIGH) {
             beep(2500,10);
             beep(1000,250);
-            Serial.print("Accepted: ");
-            Serial.println(capacity);
-            initializing = 0;            
+            DEBUG_PRINT("Accepted: ");
+            DEBUG_PRINTLN(capacity);
+
+            // Display accepted message
+            blank();
+            display.setCursor(10,19);
+            display.println("ACCEPTED!");
+            display.display();            
+            initializing = 0; 
+            delay(500);
+            blank();          
           }
         }
 
@@ -208,8 +246,6 @@ void loop() {
         
         // Record the new spool's data to eeprom
         EEPROM.put(sizeof(spool)*id, currentSpool);  // Update EEPROM with new data for this spool.          
-
-        // display save status to OLED TODO
         
         // Play reset tune.
         beep(500,100);
@@ -227,17 +263,29 @@ void loop() {
    
   // Check if current weight is below threshold, set alert status if so
   if (remaining - THRESHOLD <= 0) {
-    error("LOW ALERT:", 0);
+    error("LOW ALERT", 0);
   }
   else {
-    // display the latest data
+    error("          ", 0);
   }
+
+  // Display current information
+  display.setCursor(2, 0);
+  display.print("SPOOL:");
+  display.print(id);
+  display.setCursor(2,42);
+  display.print("LEFT:");
+  display.print(remaining);
+  display.print("g");
 }
 
-// Display an error message and optionally play an annoying notification noise and/or flash an LED.
+// Display an error message and optionally play an annoying notification noise
 void error(char string[], int hz) {
   // display error status TODO
-
+  display.setCursor(2, 20);
+  display.print(string);
+  display.display();      
+  
   // Don't beep more often than defined
   if (millis() > lastBeep + TIMEBETWEENBEEPS && hz > 0) {
     beep(hz, 100);
@@ -252,4 +300,10 @@ void beep(int hz, int s) {
     delay(s);
     noTone(BUZZERPIN);
     delay(s);
+}
+
+void blank() {
+  // Wipe display
+  display.clearDisplay();
+  display.display();
 }
